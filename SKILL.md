@@ -72,6 +72,8 @@ npx ts-node scripts/redeem.ts --condition 0x...
 
 ## Programmatic Usage
 
+> **SDK version**: Use `pnp-evm` **0.1.3 or later** (install with `npm install pnp-evm@0.1.3`).
+
 ```typescript
 import { PNPClient } from "pnp-evm";
 import { ethers } from "ethers";
@@ -143,8 +145,8 @@ For maximum security-conscious users, you can manually set specific approval amo
 
 | Contract | Address |
 |----------|---------|
-| PNP Factory | `0x5E5abF8a083a8E0c2fBf5193E711A61B1797e15A` |
-| Fee Manager | `0x6f1BffB36aC53671C9a409A0118cA6fee2b2b462` |
+| PNP Factory | `0xc2a4CCE465EB6013eb4B7Fdf6905fb6C836e2B15` |
+| Fee Manager | `0xA919362052CDeB14e88656A4Ae56A41416Fe4fc0` |
 
 ## Why Prediction Markets?
 
