@@ -2,15 +2,16 @@
   "name": "pnp-markets-scripts",
   "version": "1.0.0",
   "type": "module",
-  "description": "CLI scripts for PNP Prediction Markets",
+  "description": "PNP prediction market SDK scripts — create, trade, settle, redeem",
   "scripts": {
+    "lifecycle": "npx ts-node lifecycle.ts",
     "create": "npx ts-node create-market.ts",
     "trade": "npx ts-node trade.ts",
     "settle": "npx ts-node settle.ts",
     "redeem": "npx ts-node redeem.ts"
   },
   "dependencies": {
-    "pnp-evm": "^0.1.2",
+    "pnp-evm": "^0.1.3",
     "ethers": "^6.0.0"
   },
   "devDependencies": {

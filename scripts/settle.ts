@@ -1,181 +1,150 @@
-#!/usr/bin/env npx ts-node
 /**
- * Settle a prediction market with the winning outcome
- * Run with --help for usage
+ * Settle a prediction market using the PNP SDK.
+ *
+ * Usage:
+ *   import { settleMarket, getSettlementStatus, initClient } from "./settle";
+ *   const client = initClient();
+ *   await settleMarket(client, { conditionId: "0x...", outcome: "YES" });
  */
 
 import { PNPClient } from "pnp-evm";
 
-interface Args {
+// Re-export shared helper
+export { initClient } from "./create-market";
+import { initClient } from "./create-market";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+export interface SettleParams {
+  /** Market condition ID */
   conditionId: string;
+  /** Winning outcome: "YES" or "NO" */
   outcome: "YES" | "NO";
-  help?: boolean;
-  status?: boolean;
 }
 
-function printHelp(): void {
-  console.log(`
-PNP Markets - Settle Market
-
-USAGE:
-  npx ts-node settle.ts [OPTIONS]
-
-REQUIRED:
-  --condition <id>          Market condition ID
-  --outcome <YES|NO>        Winning outcome
-
-OPTIONAL:
-  --status                  Check settlement status only
-  --help                    Show this help message
-
-ENVIRONMENT:
-  PRIVATE_KEY               Wallet private key (required, must be market creator)
-  RPC_URL                   Base RPC endpoint (optional)
-
-NOTE:
-  Only the market creator can settle the market.
-  Market can only be settled after the trading period ends.
-
-EXAMPLES:
-  # Settle market as YES
-  npx ts-node settle.ts --condition 0x123... --outcome YES
-
-  # Check if market is settled
-  npx ts-node settle.ts --status --condition 0x123...
-`);
+export interface SettleResult {
+  hash: string;
+  winner: "YES" | "NO";
+  conditionId: string;
 }
 
-function parseArgs(): Args {
-  const args = process.argv.slice(2);
-  const parsed: Partial<Args> = {};
+export interface SettlementStatus {
+  question: string;
+  endTime: number;
+  isSettled: boolean;
+  canSettle: boolean;
+  winner?: "YES" | "NO";
+  timeLeftHours?: number;
+  timeLeftMinutes?: number;
+}
 
-  for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
-      case "--help":
-      case "-h":
-        parsed.help = true;
-        break;
-      case "--status":
-        parsed.status = true;
-        break;
-      case "--condition":
-        parsed.conditionId = args[++i];
-        break;
-      case "--outcome":
-        parsed.outcome = args[++i]?.toUpperCase() as "YES" | "NO";
-        break;
-    }
-  }
+// ---------------------------------------------------------------------------
+// Status check
+// ---------------------------------------------------------------------------
 
-  return {
-    conditionId: parsed.conditionId || "",
-    outcome: parsed.outcome || "YES",
-    help: parsed.help,
-    status: parsed.status,
+/**
+ * Check whether a market is settled, and if not, whether it can be settled now.
+ */
+export async function getSettlementStatus(
+  client: PNPClient,
+  conditionId: string
+): Promise<SettlementStatus> {
+  if (!conditionId) throw new Error("conditionId is required");
+
+  const info = await client.market.getMarketInfo(conditionId);
+  const isSettled = await client.redemption.isResolved(conditionId);
+  const endTime = parseInt(info.endTime);
+  const now = Math.floor(Date.now() / 1000);
+
+  const status: SettlementStatus = {
+    question: info.question,
+    endTime,
+    isSettled,
+    canSettle: now >= endTime && !isSettled,
   };
-}
-
-async function main(): Promise<void> {
-  const args = parseArgs();
-
-  if (args.help) {
-    printHelp();
-    process.exit(0);
-  }
-
-  if (!args.conditionId) {
-    console.error("Error: --condition is required");
-    printHelp();
-    process.exit(1);
-  }
-
-  if (!process.env.PRIVATE_KEY) {
-    console.error("Error: PRIVATE_KEY environment variable is required");
-    process.exit(1);
-  }
-
-  const client = new PNPClient({
-    rpcUrl: process.env.RPC_URL || "https://mainnet.base.org",
-    privateKey: process.env.PRIVATE_KEY,
-  });
-
-  // Fetch market info
-  console.log("\n📊 Market Status\n");
-
-  const info = await client.market.getMarketInfo(args.conditionId);
-  const isSettled = await client.redemption.isResolved(args.conditionId);
-
-  console.log(`Question:   ${info.question}`);
-  console.log(`End Time:   ${new Date(parseInt(info.endTime) * 1000).toISOString()}`);
-  console.log(`Settled:    ${isSettled}`);
 
   if (isSettled) {
-    const winningToken = await client.redemption.getWinningToken(args.conditionId);
-    const yesTokenId = await client.trading.getTokenId(args.conditionId, "YES");
-    const outcome = winningToken === yesTokenId.toString() ? "YES" : "NO";
-    console.log(`Winner:     ${outcome}`);
-
-    if (args.status) {
-      console.log("\n--- JSON OUTPUT ---");
-      console.log(JSON.stringify({ settled: true, winner: outcome }, null, 2));
-    }
-    process.exit(0);
+    const winningToken = await client.redemption.getWinningToken(conditionId);
+    const yesTokenId = await client.trading.getTokenId(conditionId, "YES");
+    status.winner = winningToken === yesTokenId.toString() ? "YES" : "NO";
+  } else if (now < endTime) {
+    const remaining = endTime - now;
+    status.timeLeftHours = Math.floor(remaining / 3600);
+    status.timeLeftMinutes = Math.floor((remaining % 3600) / 60);
   }
 
-  if (args.status) {
-    const now = Math.floor(Date.now() / 1000);
-    const endTime = parseInt(info.endTime);
-    const canSettle = now >= endTime;
-    
-    console.log(`\nCan Settle: ${canSettle}`);
-    if (!canSettle) {
-      const remaining = endTime - now;
-      const hours = Math.floor(remaining / 3600);
-      const mins = Math.floor((remaining % 3600) / 60);
-      console.log(`Time Left:  ${hours}h ${mins}m`);
-    }
-
-    console.log("\n--- JSON OUTPUT ---");
-    console.log(JSON.stringify({ settled: false, canSettle, endTime }, null, 2));
-    process.exit(0);
-  }
-
-  // Validate settlement
-  if (args.outcome !== "YES" && args.outcome !== "NO") {
-    console.error("\nError: --outcome must be YES or NO");
-    process.exit(1);
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  if (now < parseInt(info.endTime)) {
-    const remaining = parseInt(info.endTime) - now;
-    const hours = Math.floor(remaining / 3600);
-    const mins = Math.floor((remaining % 3600) / 60);
-    console.error(`\n❌ Cannot settle yet. Trading ends in ${hours}h ${mins}m`);
-    process.exit(1);
-  }
-
-  // Execute settlement
-  console.log(`\n⚖️ Settling Market\n`);
-  console.log(`Outcome:    ${args.outcome}`);
-  console.log(`Wallet:     ${client.client.signer?.address}`);
-
-  try {
-    const winningTokenId = await client.trading.getTokenId(args.conditionId, args.outcome);
-    const result = await client.market.settleMarket(args.conditionId, winningTokenId);
-
-    console.log("\n✅ Market Settled!\n");
-    console.log(`Winner:   ${args.outcome}`);
-    console.log(`Tx Hash:  ${result.hash}`);
-    console.log(`\nBaseScan: https://basescan.org/tx/${result.hash}`);
-
-    console.log("\n--- JSON OUTPUT ---");
-    console.log(JSON.stringify({ settled: true, winner: args.outcome, hash: result.hash }, null, 2));
-
-  } catch (error: any) {
-    console.error("\n❌ Settlement failed:", error.message);
-    process.exit(1);
-  }
+  return status;
 }
 
-main();
+// ---------------------------------------------------------------------------
+// Settle
+// ---------------------------------------------------------------------------
+
+/**
+ * Settle a market with the winning outcome.
+ * Only the market creator can call this, and only after the trading period has ended.
+ *
+ * @param client  - Initialised PNPClient
+ * @param params  - Condition ID and winning outcome
+ * @returns       - Transaction hash and settlement details
+ */
+export async function settleMarket(
+  client: PNPClient,
+  params: SettleParams
+): Promise<SettleResult> {
+  const { conditionId, outcome } = params;
+
+  if (!conditionId) throw new Error("conditionId is required");
+  if (outcome !== "YES" && outcome !== "NO") throw new Error("outcome must be YES or NO");
+
+  // Pre-flight checks
+  const status = await getSettlementStatus(client, conditionId);
+
+  if (status.isSettled) {
+    throw new Error(`Market is already settled. Winner: ${status.winner}`);
+  }
+
+  if (!status.canSettle) {
+    throw new Error(
+      `Cannot settle yet. Trading ends in ${status.timeLeftHours}h ${status.timeLeftMinutes}m`
+    );
+  }
+
+  console.log("\n--- Settling Market ---");
+  console.log(`Question: ${status.question}`);
+  console.log(`Outcome:  ${outcome}`);
+  console.log(`Wallet:   ${client.client.signer?.address}\n`);
+
+  const winningTokenId = await client.trading.getTokenId(conditionId, outcome);
+  const result = await client.market.settleMarket(conditionId, winningTokenId);
+
+  console.log("Market Settled!");
+  console.log(`Winner:   ${outcome}`);
+  console.log(`Tx Hash:  ${result.hash}`);
+  console.log(`BaseScan: https://basescan.org/tx/${result.hash}\n`);
+
+  return { hash: result.hash, winner: outcome, conditionId };
+}
+
+// ---------------------------------------------------------------------------
+// Standalone entry-point
+// ---------------------------------------------------------------------------
+if (require.main === module) {
+  (async () => {
+    const client = initClient();
+    const conditionId = process.argv[2];
+    if (!conditionId) {
+      console.log("Usage: npx ts-node settle.ts <conditionId>");
+      console.log("This will display settlement status.");
+      process.exit(0);
+    }
+
+    const status = await getSettlementStatus(client, conditionId);
+    console.log("--- Settlement Status ---");
+    console.log(JSON.stringify(status, null, 2));
+  })().catch((err) => {
+    console.error("Failed:", err.message);
+    process.exit(1);
+  });
+}

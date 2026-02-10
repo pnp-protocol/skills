@@ -1,128 +1,93 @@
-#!/usr/bin/env npx ts-node
 /**
- * Redeem winning tokens for collateral after settlement
- * Run with --help for usage
+ * Redeem winning tokens for collateral after market settlement using the PNP SDK.
+ *
+ * Usage:
+ *   import { redeemWinnings, initClient } from "./redeem";
+ *   const client = initClient();
+ *   await redeemWinnings(client, "0x<conditionId>");
  */
 
 import { PNPClient } from "pnp-evm";
 
-interface Args {
+// Re-export shared helper
+export { initClient } from "./create-market";
+import { initClient } from "./create-market";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+export interface RedeemResult {
+  hash: string;
   conditionId: string;
-  help?: boolean;
+  winner: "YES" | "NO";
+  question: string;
 }
 
-function printHelp(): void {
-  console.log(`
-PNP Markets - Redeem Winnings
+// ---------------------------------------------------------------------------
+// Core function
+// ---------------------------------------------------------------------------
 
-USAGE:
-  npx ts-node redeem.ts --condition <id>
-
-REQUIRED:
-  --condition <id>          Market condition ID
-
-OPTIONAL:
-  --help                    Show this help message
-
-ENVIRONMENT:
-  PRIVATE_KEY               Wallet private key (required)
-  RPC_URL                   Base RPC endpoint (optional)
-
-NOTE:
-  Can only redeem after market is settled.
-  Must hold winning outcome tokens to redeem.
-
-EXAMPLES:
-  npx ts-node redeem.ts --condition 0x123...
-`);
-}
-
-function parseArgs(): Args {
-  const args = process.argv.slice(2);
-  const parsed: Partial<Args> = {};
-
-  for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
-      case "--help":
-      case "-h":
-        parsed.help = true;
-        break;
-      case "--condition":
-        parsed.conditionId = args[++i];
-        break;
-    }
-  }
-
-  return {
-    conditionId: parsed.conditionId || "",
-    help: parsed.help,
-  };
-}
-
-async function main(): Promise<void> {
-  const args = parseArgs();
-
-  if (args.help) {
-    printHelp();
-    process.exit(0);
-  }
-
-  if (!args.conditionId) {
-    console.error("Error: --condition is required");
-    printHelp();
-    process.exit(1);
-  }
-
-  if (!process.env.PRIVATE_KEY) {
-    console.error("Error: PRIVATE_KEY environment variable is required");
-    process.exit(1);
-  }
-
-  const client = new PNPClient({
-    rpcUrl: process.env.RPC_URL || "https://mainnet.base.org",
-    privateKey: process.env.PRIVATE_KEY,
-  });
+/**
+ * Redeem winning outcome tokens for collateral.
+ * The market must be settled and the caller must hold winning tokens.
+ *
+ * @param client      - Initialised PNPClient
+ * @param conditionId - Market condition ID
+ * @returns           - Transaction hash and redemption details
+ */
+export async function redeemWinnings(
+  client: PNPClient,
+  conditionId: string
+): Promise<RedeemResult> {
+  if (!conditionId) throw new Error("conditionId is required");
 
   // Check settlement status
-  console.log("\n📊 Checking Market\n");
-
-  const isSettled = await client.redemption.isResolved(args.conditionId);
-
+  const isSettled = await client.redemption.isResolved(conditionId);
   if (!isSettled) {
-    const info = await client.market.getMarketInfo(args.conditionId);
-    console.log(`Question: ${info.question}`);
-    console.error("\n❌ Market is not yet settled. Cannot redeem.");
-    process.exit(1);
+    const info = await client.market.getMarketInfo(conditionId);
+    throw new Error(
+      `Market is not yet settled. Question: "${info.question}". Cannot redeem.`
+    );
   }
 
   // Get winning info
-  const info = await client.market.getMarketInfo(args.conditionId);
-  const winningToken = await client.redemption.getWinningToken(args.conditionId);
-  const yesTokenId = await client.trading.getTokenId(args.conditionId, "YES");
-  const winner = winningToken === yesTokenId.toString() ? "YES" : "NO";
+  const info = await client.market.getMarketInfo(conditionId);
+  const winningToken = await client.redemption.getWinningToken(conditionId);
+  const yesTokenId = await client.trading.getTokenId(conditionId, "YES");
+  const winner: "YES" | "NO" = winningToken === yesTokenId.toString() ? "YES" : "NO";
 
+  console.log("\n--- Redeeming Winnings ---");
   console.log(`Question:   ${info.question}`);
   console.log(`Winner:     ${winner}`);
   console.log(`Collateral: ${info.collateral}`);
+  console.log(`Wallet:     ${client.client.signer?.address}\n`);
 
-  // Execute redemption
-  console.log(`\n💰 Redeeming Position\n`);
-  console.log(`Wallet:     ${client.client.signer?.address}`);
+  const result = await client.redemption.redeem(conditionId);
 
-  try {
-    const result = await client.redemption.redeem(args.conditionId);
+  console.log("Redemption Successful!");
+  console.log(`Tx Hash:  ${result.hash}`);
+  console.log(`BaseScan: https://basescan.org/tx/${result.hash}\n`);
 
-    console.log("\n✅ Redemption Successful!\n");
-    console.log(`Tx Hash:  ${result.hash}`);
-    console.log(`\nBaseScan: https://basescan.org/tx/${result.hash}`);
-
-    console.log("\n--- JSON OUTPUT ---");
-    console.log(JSON.stringify({ redeemed: true, hash: result.hash }, null, 2));
-
-  } catch (error: any) {
-    console.error("\n❌ Redemption failed:", error.message);
-    process.exit(1);
-  }
+  return { hash: result.hash, conditionId, winner, question: info.question };
 }
 
-main();
+// ---------------------------------------------------------------------------
+// Standalone entry-point
+// ---------------------------------------------------------------------------
+if (require.main === module) {
+  (async () => {
+    const client = initClient();
+    const conditionId = process.argv[2];
+    if (!conditionId) {
+      console.log("Usage: npx ts-node redeem.ts <conditionId>");
+      process.exit(0);
+    }
+
+    const result = await redeemWinnings(client, conditionId);
+    console.log("--- JSON OUTPUT ---");
+    console.log(JSON.stringify(result, null, 2));
+  })().catch((err) => {
+    console.error("Failed:", err.message);
+    process.exit(1);
+  });
+}

@@ -173,8 +173,8 @@ const result = await client.redemption.redeem(conditionId);
 
 | Contract | Address |
 |----------|---------|
-| PNP Factory | `0x5E5abF8a083a8E0c2fBf5193E711A61B1797e15A` |
-| Fee Manager | `0x6f1BffB36aC53671C9a409A0118cA6fee2b2b462` |
+| PNP Factory | `0xc2a4CCE465EB6013eb4B7Fdf6905fb6C836e2B15` |
+| Fee Manager | `0xA919362052CDeB14e88656A4Ae56A41416Fe4fc0` |
 | USDC | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
 | WETH | `0x4200000000000000000000000000000000000006` |
 | cbETH | `0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22` |
