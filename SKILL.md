@@ -155,6 +155,8 @@ const { hash, winner } = await redeemWinnings(client, conditionId);
 
 The `scripts/lifecycle.ts` script demonstrates the complete flow — create, trade, settle, and redeem — in a single run:
 
+> **SDK version**: Use `pnp-evm` **0.1.3 or later** (install with `npm install pnp-evm@0.1.3`).
+
 ```typescript
 import { initClient, createMarket } from "./scripts/create-market";
 import { buyTokens, sellTokens, getMarketInfo } from "./scripts/trade";
